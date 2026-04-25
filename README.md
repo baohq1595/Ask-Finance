@@ -72,6 +72,8 @@ Supported env vars:
 - `python app.py`
 - Open the Gradio URL printed in terminal.
 
+![Ask Finance Demo Page](demo.png)
+
 ## Example prompts
 
 - `What was our Opex variance for Q2 2024 in the Electronics division?`
