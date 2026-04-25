@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+logs/
+*.xlsx
+*.log
+.eggs/
+*.egg-info/
+dist/
+build/
+authen/
+
+# Uncomment if you do not want to commit service account keys:
+# authen/

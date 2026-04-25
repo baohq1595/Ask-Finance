@@ -1,0 +1,19 @@
+{
+  "roles": {
+    "Group CFO": {
+      "description": "Group-wide read including all BUs and regions",
+      "allowed_bu": null,
+      "allowed_regions": null
+    },
+    "Electronics GM": {
+      "description": "Electronics business unit only, all regions",
+      "allowed_bu": ["Electronics"],
+      "allowed_regions": null
+    },
+    "APAC Analyst": {
+      "description": "APAC region only, all BUs in that region",
+      "allowed_bu": null,
+      "allowed_regions": ["APAC"]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+project_id,name,bu,region,currency,cumulative_investment_musd,cumulative_benefit_musd,reporting_year
+P-1001,Orion,Electronics,EMEA,USD,12.0,2.0,2021
+P-1001,Orion,Electronics,EMEA,USD,15.0,4.0,2022
+P-1001,Orion,Electronics,EMEA,USD,18.0,8.0,2023
+P-1001,Orion,Electronics,EMEA,USD,20.0,14.0,2024
+P-2002,Atlas,Retail,APAC,USD,5.0,1.0,2023
+P-2002,Atlas,Retail,APAC,USD,6.0,1.4,2024
