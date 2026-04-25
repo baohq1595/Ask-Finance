@@ -2,6 +2,20 @@
 
 Finance-domain AI agent demo using `gemini-2.5-flash`, mock SAP/HFM-like data, role-based access control (RBAC), and a Gradio UI.
 
+## Additional Documents
+
+- `docs/ARCHITECTURE.md`:
+    - Describe your system’s architecture and workflow.
+    - Explain how the system ensures security and accuracy.
+    - Include diagrams or examples of queries and expected outputs.
+
+- `docs/FUTURE.md`:
+    - Future plan suggest how this system could scale across BUs, integrate real SAP connectors, or use embeddings for finance knowledge.
+
+- `data/README.md`:
+    - Mock data description.
+
+
 ## What this prototype covers
 
 - English-only Q&A for finance prompts (P&L, opex variance, EBIT margin trend, project ROI trend).
