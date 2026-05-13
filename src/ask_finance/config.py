@@ -1,4 +1,15 @@
-"""Paths and model settings. Resolves from repo root."""
+"""Paths and model settings.
+
+Path resolution order (works whether the package is run editable from ``src/``
+or installed into site-packages):
+
+1. Explicit env var (``ASK_FINANCE_DATA_DIR``, ``ASK_FINANCE_LOGS_DIR``,
+   ``ASK_FINANCE_REPO_ROOT``).
+2. Walk up from this file looking for a directory that contains ``data/``
+   (handles ``src/ask_finance/config.py`` editable installs).
+3. ``Path.cwd()`` — useful when launching ``uvicorn`` from the repo root with
+   the package installed non-editable.
+"""
 
 from __future__ import annotations
 
@@ -7,14 +18,54 @@ import os
 from pathlib import Path
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _env_path(name: str) -> Path | None:
+    v = os.environ.get(name)
+    if not v:
+        return None
+    return Path(v).expanduser().resolve()
 
 
-REPO_ROOT = _repo_root()
-DATA_DIR = REPO_ROOT / "data"
-DEFAULT_SERVICE_ACCOUNT = REPO_ROOT / "authen" / "service-account.json"
-LOGS_DIR = REPO_ROOT / "logs"
+def _find_repo_root() -> Path:
+    env = _env_path("ASK_FINANCE_REPO_ROOT")
+    if env and env.is_dir():
+        return env
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        if (parent / "data").is_dir():
+            return parent
+    cwd = Path.cwd().resolve()
+    if (cwd / "data").is_dir():
+        return cwd
+    return here.parents[2] if len(here.parents) >= 3 else cwd
+
+
+REPO_ROOT = _find_repo_root()
+
+
+def _resolve_data_dir() -> Path:
+    env = _env_path("ASK_FINANCE_DATA_DIR")
+    if env:
+        return env
+    candidates = [
+        REPO_ROOT / "data",
+        Path.cwd() / "data",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c.resolve()
+    return candidates[0]
+
+
+def _resolve_logs_dir() -> Path:
+    env = _env_path("ASK_FINANCE_LOGS_DIR")
+    if env:
+        return env
+    return (REPO_ROOT / "logs").resolve()
+
+
+DATA_DIR = _resolve_data_dir()
+LOGS_DIR = _resolve_logs_dir()
+DEFAULT_SERVICE_ACCOUNT = (REPO_ROOT / "authen" / "service-account.json").resolve()
 
 
 def _read_project_id_from_sa(path: Path) -> str | None:
@@ -54,8 +105,18 @@ def get_credentials_path() -> Path:
     return DEFAULT_SERVICE_ACCOUNT
 
 
-def apply_credentials_env() -> Path:
-    """Set GOOGLE_APPLICATION_CREDENTIALS to default JSON if not set. Returns path used."""
+def apply_credentials_env() -> Path | None:
+    """Point GOOGLE_APPLICATION_CREDENTIALS at the local service account JSON when it exists.
+
+    Returns the path that was applied, or ``None`` if no file is present. In hosted
+    environments (e.g. Cloud Run) the platform supplies Application Default
+    Credentials, so leaving the env var unset is the correct behavior.
+    """
+    explicit = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if explicit:
+        return Path(explicit)
     path = get_credentials_path()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path.resolve())
-    return path
+    if path.is_file():
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path.resolve())
+        return path
+    return None

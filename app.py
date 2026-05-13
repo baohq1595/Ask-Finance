@@ -1,11 +1,14 @@
-"""Gradio entry point: Ask Finance — English UI, role-based Q&A, exports, logging."""
+"""Gradio entry point: Ask Finance — English UI, role-based Q&A, exports, logging.
+
+This module is a *thin UI client*. All finance / agent logic lives behind the
+FastAPI backend in ``ask_finance.api`` and is reached over HTTP.
+"""
 
 from __future__ import annotations
 
 import ast
 import json
 import logging
-import re
 import sys
 import uuid
 from pathlib import Path
@@ -23,32 +26,25 @@ if SRC_PATH.exists() and str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from ask_finance import config
-from ask_finance.agent import run_ask
-from ask_finance.data_loaders import load_all, FinancialData
+from ask_finance.api_client import ApiError, AskFinanceClient
 from ask_finance.logging_setup import setup_logging
-from ask_finance.tools import (
-    get_ebit_margin_trend,
-    get_opex_variance,
-    get_project_roi_trend,
-)
 
 logger = logging.getLogger("ask_finance.app")
 
 matplotlib.use("Agg")
 
-_fd: FinancialData | None = None
+_client = AskFinanceClient()
 _LAST: dict[str, Any] = {}
 
 
-def get_fd() -> FinancialData:
-    global _fd
-    if _fd is None:
-        _fd = load_all()
-    return _fd
-
-
-def _roles() -> list[str]:
-    return list(get_fd().rbac.get("roles", {}).keys()) or ["Group CFO"]
+def _fetch_roles() -> list[str]:
+    try:
+        roles = _client.roles()
+        if roles:
+            return roles
+    except ApiError as e:
+        logger.warning("Cannot fetch roles from backend: %s", e)
+    return ["Group CFO"]
 
 
 def _content_to_text(content: Any) -> str:
@@ -113,74 +109,6 @@ def _normalize_history(history: list | None) -> list[dict[str, str]]:
     return normalized
 
 
-def _fallback_tool_trace(message: str, fd: FinancialData, role: str) -> list[dict[str, Any]]:
-    """If model returns no function calls, run one deterministic tool by intent."""
-    q = (message or "").lower()
-    proj_years = sorted(fd.projects["reporting_year"].dropna().astype(int).unique().tolist())
-    pl_years = sorted(fd.pl_monthly["fiscal_year"].dropna().astype(int).unique().tolist())
-    latest_year = proj_years[-1] if proj_years else 2024
-    start_default = latest_year - 2
-    m_year = re.findall(r"\b(20\d{2})\b", q)
-    if len(m_year) >= 2:
-        start_y, end_y = int(m_year[0]), int(m_year[-1])
-    elif len(m_year) == 1:
-        end_y = int(m_year[0])
-        start_y = end_y - 2
-    else:
-        start_y, end_y = start_default, latest_year
-
-    if "roi" in q or "orion" in q:
-        args = {"project_name": "Orion", "start_year": start_y, "end_year": end_y}
-        return [
-            {
-                "tool": "get_project_roi_trend",
-                "args": json.dumps(args),
-                "result": get_project_roi_trend(fd, role, args),
-                "s": 0.0,
-            }
-        ]
-
-    q_match = re.search(r"\bq([1-4])\b", q)
-    quarter = int(q_match.group(1)) if q_match else 2
-    year_for_var = int(m_year[0]) if m_year else latest_year
-    if "opex" in q and "variance" in q:
-        bu = "Electronics" if "electronics" in q else None
-        args = {"fiscal_year": year_for_var, "quarter": quarter}
-        if bu:
-            args["bu"] = bu
-        return [
-            {
-                "tool": "get_opex_variance",
-                "args": json.dumps(args),
-                "result": get_opex_variance(fd, role, args),
-                "s": 0.0,
-            }
-        ]
-
-    if "ebit" in q and "margin" in q:
-        if pl_years:
-            if "all years" in q or "all year" in q:
-                start_y = pl_years[0]
-                end_y = pl_years[-1]
-            else:
-                start_y = max(start_y, pl_years[0])
-                end_y = min(end_y, pl_years[-1])
-                if start_y > end_y:
-                    start_y, end_y = pl_years[0], pl_years[-1]
-        args = {"start_year": start_y, "end_year": end_y}
-        if "electronics" in q:
-            args["bu"] = "Electronics"
-        return [
-            {
-                "tool": "get_ebit_margin_trend",
-                "args": json.dumps(args),
-                "result": get_ebit_margin_trend(fd, role, args),
-                "s": 0.0,
-            }
-        ]
-    return []
-
-
 def _build_insights_from_trace(trace: list[dict[str, Any]]) -> list[str]:
     insights: list[str] = []
     for step in trace:
@@ -229,17 +157,27 @@ def answer_fn(message: str, history: list, role: str) -> tuple:
             gr.update(),
             _LAST.get("artifact_note", ""),
         )
-    fd = get_fd()
-    out = run_ask(fd, role, message.strip())
+    try:
+        out = _client.ask(role, message.strip())
+    except ApiError as e:
+        err = f"Backend error: {e}"
+        logger.error(err)
+        new_hist = safe_history + [
+            {"role": "user", "content": _content_to_text(message)},
+            {"role": "assistant", "content": err},
+        ]
+        return (
+            new_hist,
+            gr.update(value=""),
+            "",
+            err,
+            None,
+            gr.update(value=None),
+            gr.update(value=None),
+            "No artifact generated for this turn.",
+        )
     text = out.get("answer", "")
-    trace = out.get("tool_trace", [])
-    if not trace:
-        fallback = _fallback_tool_trace(message, fd, role)
-        if fallback:
-            trace = fallback
-            text = (
-                f"{text}\n\n(Used fallback finance tool execution for artifact generation.)"
-            ).strip()
+    trace = out.get("tool_trace", []) or []
     trace_md = json.dumps(trace, indent=2) if trace else ""
     insight_lines = _build_insights_from_trace(trace)
     if "insight" in (message or "").lower() and insight_lines:
@@ -382,11 +320,19 @@ def export_ppt() -> str | None:
 def on_load():
     setup_logging()
     try:
-        config.apply_credentials_env()
-    except OSError as e:
-        logger.warning("Credentials: %s", e)
-    get_fd()
-    logger.info("App load: data and logging ready. Project=%s", config.GOOGLE_PROJECT_ID)
+        info = _client.health()
+        logger.info(
+            "App load: backend reachable at %s (project=%s, model=%s).",
+            _client.base_url,
+            info.get("project"),
+            info.get("model"),
+        )
+    except ApiError as e:
+        logger.warning(
+            "Backend at %s is not reachable yet: %s. Start it with `uvicorn ask_finance.api:app`.",
+            _client.base_url,
+            e,
+        )
     return None
 
 
@@ -398,7 +344,7 @@ English-only. Choose a **role** to simulate RBAC, then ask about P&L, opex varia
 Example: *What was opex variance for Q2 2024 in the Electronics division?* — *Show ROI trend for Project Orion for 2021–2023.*
 """
     )
-    role = gr.Dropdown(choices=_roles(), value="Group CFO", label="Role (RBAC simulation)")
+    role = gr.Dropdown(choices=_fetch_roles(), value="Group CFO", label="Role (RBAC simulation)")
     chat = gr.Chatbot(label="Chat", height=400)
     msg = gr.Textbox(label="Message", lines=2, placeholder="Your question in English…")
     plot = gr.Plot(label="Auto chart (when EBIT margin trend tool is used)")
@@ -445,6 +391,4 @@ Example: *What was opex variance for Q2 2024 in the Electronics division?* — *
 
 if __name__ == "__main__":
     setup_logging()
-    config.apply_credentials_env()
-    get_fd()
     demo.queue().launch(server_name="0.0.0.0", server_port=7860, share=False)

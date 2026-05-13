@@ -1,0 +1,42 @@
+# Keep the build context tight: only ship code + mock data needed by the API.
+.git
+.gitignore
+.venv
+.idea
+.vscode
+.DS_Store
+**/.DS_Store
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+src/*.egg-info
+
+# Secrets must never be baked into the image.
+authen/
+**/service-account.json
+*.pem
+*.key
+.env
+.env.*
+
+# Local artifacts / outputs.
+logs/
+**/logs/
+**/*.log
+
+# UI / documentation / submission bundles — not needed by the backend service.
+app.py
+demo.png
+ask_finance_architecture.svg
+docs/
+submission/
+reference/
+requirements/
+README.md
+requirements.txt
+
+# Docker / CI metadata
+Dockerfile
+.dockerignore

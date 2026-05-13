@@ -27,7 +27,11 @@ def get_client() -> genai.Client:
             "GOOGLE_PROJECT_ID / GOOGLE_CLOUD_PROJECT not set and could not read project_id from service account. "
             f"Checked credentials: {path}"
         )
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path)
+    if path is not None:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(path)
+        logger.info("Using service account credentials from %s", path)
+    else:
+        logger.info("No local service account found; relying on Application Default Credentials.")
     _client = genai.Client(
         vertexai=True,
         project=config.GOOGLE_PROJECT_ID,
